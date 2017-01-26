@@ -1,0 +1,106 @@
+---
+title: "Practical Machine Learning"
+author: "Klemen Rizman"
+date: "January 25, 2017"
+output: html_document
+---
+
+# Synopsis
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, my goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+# Preparations
+
+## Load library
+```{r prepare, echo=FALSE, message=FALSE}
+library(Amelia)
+library(caret)
+library(parallel)
+library(doParallel)
+library(randomForest)
+library(rpart)
+library(rattle)
+```
+
+## Download & read data
+```{r load}
+train <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"), 
+                  na.strings = c("NA","","#DIV/0!"), header = TRUE)
+test <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"), 
+                  na.strings = c("NA","","#DIV/0!"), header = TRUE)
+
+```
+
+## Clean data
+1. Look at missing values
+2. Find collumns with zero NA values
+3. Find collumns with near zero variance value
+4. Remove first five rows, because they are not relevant for prediction
+```{r clean}
+missmap(train, main = "Missing values vs observed")
+naVal <- is.na(train)
+train <- train[,colSums(naVal) == 0]
+test <- test[,colSums(naVal) == 0]
+
+zeroVar <- nearZeroVar(train)
+train <- train[,-zeroVar]
+test <- test[,-zeroVar]
+train <- train[,-(1:6)]
+test <- test[,-(1:6)]
+test$problem_id <- NULL
+
+```
+
+## Test & train data set for learning
+I have created train and test set from training data. Train set is 60% and test set is 40% of training data. This was made for resampling
+```{r split}
+set.seed(42)
+inTrain <- createDataPartition(train$classe, p = 0.6, list = FALSE)
+trainSet <- train[inTrain,]
+testSet <- train[-inTrain,]
+```
+
+# Predictions
+With this models we will try to pridict variable classe, with all predictors there were left from cleaning process. Then I will look at accuracies and choose a model with highest accuracy. For resampling I was choosing between bootstrap, croos validation and LOOCV. I choose cross validation with 10 subsets, because I found out that I have eto choose it.
+
+## Decision Tree
+```{r rpart}
+fitControl <- trainControl(method = "cv", number = 10, allowParallel = TRUE)
+fitDT <- train(classe ~ .,data = trainSet, method = "rpart", trControl = fitControl)
+predictionDT = predict(fitDT,testSet)
+confusionMatrix(testSet$classe,predictionDT)
+fancyRpartPlot(fitDT$finalModel)
+```
+
+
+## Generalized Boosted Regression Model GBM
+```{r gbm}
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+fitGBM <- train(classe ~ .,data = trainSet, method = "gbm", trControl = fitControl)
+stopCluster(cluster)
+registerDoSEQ()
+predictionGBM = predict(fitGBM,testSet)
+confusionMatrix(testSet$classe,predictionGBM)
+```
+
+
+## Random Forests
+```{r rf}
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+fitRF <- train(classe ~ .,data = trainSet, method = "rf", trControl = fitControl)
+stopCluster(cluster)
+registerDoSEQ()
+predictionRF = predict(fitRF,testSet)
+confusionMatrix(testSet$classe,predictionRF)
+```
+
+# Conclusion
+## Model selection
+Now that we have all our models and confusion matrixes, we can see that the highest accuracy has random forests with 0.9922 accuracy and sample error 0.0018. With accuracy that high, we could say that the models could be overfitting.
+
+##Test data prediction
+```{r prediction}
+result <- predict(fitRF,test)
+```
+The prediction model was 100% correct as I got all 20 points in quiz. It would be interesting to test it on any other test data to try if there truly was no overfitting. The random forrest was clearly the model with highest accuracy and it worked great on test set.
